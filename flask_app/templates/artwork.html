@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>{{ artwork.title }} — ArtVault</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Georgia', serif; background: #f8f6f2; color: #222; }
+    header {
+      background: #1a1a1a; color: #f0ece4; padding: 20px 40px;
+    }
+    header h1 { font-size: 1.8rem; letter-spacing: 2px; }
+    header a  { color: #aaa; text-decoration: none; font-size: 0.85rem; }
+
+    .container { max-width: 800px; margin: 60px auto; padding: 0 30px; }
+
+    .artwork-display {
+      width: 100%; height: 320px;
+      background: linear-gradient(135deg, #3b2f2f, #8b6f47);
+      border-radius: 8px; display: flex; align-items: center;
+      justify-content: center; font-size: 5rem; margin-bottom: 30px;
+    }
+
+    h2 { font-size: 2rem; margin-bottom: 8px; }
+    .artist { font-size: 1.1rem; color: #666; margin-bottom: 20px; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+    td { padding: 10px 0; border-bottom: 1px solid #e8e4de; font-size: 0.95rem; }
+    td:first-child { color: #888; width: 140px; }
+
+    .price { font-size: 1.4rem; font-weight: bold; color: #2c5f2e; margin-bottom: 20px; }
+    .back  { color: #1a1a1a; text-decoration: none; font-size: 0.9rem; }
+    .back:hover { text-decoration: underline; }
+
+    footer { text-align:center; padding:30px; font-size:0.78rem; color:#aaa; margin-top:60px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1><a href="/" style="color:#f0ece4;text-decoration:none;">ArtVault</a></h1>
+</header>
+
+<div class="container">
+  <div class="artwork-display">🖼️</div>
+
+  <h2>{{ artwork.title }}</h2>
+  <div class="artist">by {{ artwork.artist }}</div>
+
+  <table>
+    <tr><td>Style</td><td>{{ artwork.style }}</td></tr>
+    <tr><td>Year</td><td>{{ artwork.year }}</td></tr>
+    <tr><td>Artist</td><td>{{ artwork.artist }}</td></tr>
+    <tr><td>Artwork ID</td><td>#{{ artwork.id }}</td></tr>
+  </table>
+
+  <div class="price">{{ artwork.price }}</div>
+  <a class="back" href="/">&larr; Back to Gallery</a>
+</div>
+
+<footer>&copy; 2026 ArtVault. All rights reserved.</footer>
+
+</body>
+</html>

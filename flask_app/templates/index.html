@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ArtVault — Discover Original Art</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Georgia', serif; background: #f8f6f2; color: #222; }
+
+    header {
+      background: #1a1a1a; color: #f0ece4; padding: 20px 40px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header h1 { font-size: 1.8rem; letter-spacing: 2px; }
+    header p  { font-size: 0.85rem; color: #aaa; }
+
+    .hero {
+      background: linear-gradient(135deg, #2c2c2c, #4a3f35);
+      color: #f0ece4; text-align: center; padding: 60px 20px;
+    }
+    .hero h2 { font-size: 2.2rem; margin-bottom: 10px; }
+    .hero p  { font-size: 1rem; color: #ccc; }
+
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 24px; padding: 40px;
+      max-width: 1200px; margin: 0 auto;
+    }
+
+    .card {
+      background: #fff; border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      overflow: hidden; transition: transform 0.2s;
+    }
+    .card:hover { transform: translateY(-4px); }
+
+    .card-img {
+      width: 100%; height: 180px;
+      background: linear-gradient(135deg, var(--c1), var(--c2));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 2.5rem;
+    }
+
+    .card-body { padding: 16px; }
+    .card-body h3 { font-size: 1rem; margin-bottom: 4px; }
+    .card-body .artist { font-size: 0.82rem; color: #777; margin-bottom: 8px; }
+    .card-body .meta   { font-size: 0.78rem; color: #999; margin-bottom: 10px; }
+    .card-body .price  { font-weight: bold; color: #2c5f2e; }
+
+    .card-body a {
+      display: inline-block; margin-top: 10px;
+      padding: 6px 14px; background: #1a1a1a; color: #fff;
+      border-radius: 4px; text-decoration: none; font-size: 0.82rem;
+    }
+
+    footer {
+      text-align: center; padding: 30px;
+      font-size: 0.78rem; color: #aaa; border-top: 1px solid #e0ddd8;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>ArtVault</h1>
+    <p>Original works. Protected creators.</p>
+  </div>
+  <div style="font-size:0.8rem; color:#888;">
+    API: <code style="color:#ccc;">/api/artworks</code>
+  </div>
+</header>
+
+<div class="hero">
+  <h2>Discover Original Art</h2>
+  <p>A curated collection of independent artists. All rights reserved.</p>
+</div>
+
+{% set colors = [
+  ("#6b4226","#c9956c"), ("#1a3a4a","#5b9aad"), ("#2d4a1e","#7ab648"),
+  ("#4a1a4a","#c96bc9"), ("#1a1a4a","#5b5bad"), ("#4a3a1a","#c9a84c"),
+  ("#1a4a3a","#4cc9a8"), ("#4a1a1a","#c94c4c"), ("#2a1a4a","#8b5bc9"),
+  ("#1a4a4a","#4cc9c9")
+] %}
+
+<div class="gallery">
+  {% for artwork in artworks %}
+  {% set c = colors[loop.index0 % colors|length] %}
+  <div class="card">
+    <div class="card-img" style="--c1:{{ c[0] }};--c2:{{ c[1] }};">🎨</div>
+    <div class="card-body">
+      <h3>{{ artwork.title }}</h3>
+      <div class="artist">by {{ artwork.artist }}</div>
+      <div class="meta">{{ artwork.style }} &middot; {{ artwork.year }}</div>
+      <div class="price">{{ artwork.price }}</div>
+      <a href="/artwork/{{ artwork.id }}">View Details</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<footer>
+  &copy; 2026 ArtVault. All artwork protected under copyright law.
+  Unauthorized scraping or downloading is prohibited.
+</footer>
+
+</body>
+</html>

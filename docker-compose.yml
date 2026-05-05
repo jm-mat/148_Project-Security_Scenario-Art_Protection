@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+
+  # Flask art-sharing website — accessible at http://localhost:5000
+  flask:
+    image: python:3.11-slim
+    container_name: artvault_flask
+    working_dir: /app
+    volumes:
+      - ./flask_app:/app
+    ports:
+      - "5000:5000"
+    command: >
+      sh -c "pip install flask --quiet && python3 app.py"
+    networks:
+      artvault_net:
+        ipv4_address: 172.20.0.10
+
+  # Mininet simulation environment (Linux required — runs in privileged container)
+  mininet:
+    image: iwaseyusuke/mininet
+    container_name: artvault_mininet
+    privileged: true
+    network_mode: host
+    volumes:
+      - .:/app
+    stdin_open: true
+    tty: true
+    command: >
+      sh -c "pip install requests --quiet &&
+             echo 'Mininet ready. Run: sudo python3 /app/mininet/topology.py' &&
+             bash"
+
+networks:
+  artvault_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
