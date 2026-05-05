@@ -2,9 +2,9 @@ import os
 import time
 import json
 import logging
-from collections import defaultdict
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, abort
+from collections import defaultdict, deque
 
 app = Flask(__name__)
 
@@ -17,13 +17,28 @@ logging.basicConfig(
 )
 
 # ── In-memory stores ──────────────────────────────────────────────────────────
-request_counts = defaultdict(list)   # ip -> [timestamps]
-blocked_ips    = set()
+request_counts = defaultdict(list)       # ip -> [timestamps]
+api_request_counts = defaultdict(list)   # ip -> [timestamps]
+global_api_requests = []                 # all API timestamps
+blocked_ips = set()
+
+anomaly_scores = defaultdict(int)        # ip -> score
+anomaly_reasons = defaultdict(list)      # ip -> list of reasons
+artwork_ids_seen = defaultdict(set)      # ip -> artwork ids scraped
+honeypot_hits = defaultdict(int)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-RATE_LIMIT_WINDOW = 10   # seconds
-RATE_LIMIT_MAX    = 20   # requests per window before rate-limit
-BLOCK_THRESHOLD   = 50   # requests per window before hard block
+RATE_LIMIT_WINDOW = 10
+RATE_LIMIT_MAX = 20
+BLOCK_THRESHOLD = 50
+
+API_RATE_LIMIT_MAX = 15          # stricter limit for /api routes
+GLOBAL_API_LIMIT_MAX = 80        # catches distributed scraping burst
+ANOMALY_BLOCK_SCORE = 6
+
+# Only enable this for your simulation if you want X-Forwarded-For spoofing
+# in distributed_scraper.py to count as different IPs.
+TRUST_X_FORWARDED_FOR = os.getenv("TRUST_X_FORWARDED_FOR", "false").lower() == "true"
 
 # ── Mock artwork data ─────────────────────────────────────────────────────────
 ARTWORKS = [
@@ -41,62 +56,170 @@ ARTWORKS = [
 
 ARTWORK_INDEX = {a["id"]: a for a in ARTWORKS}
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-def log_request(ip, path, status, flagged=False):
+# ── Defense helpers ───────────────────────────────────────────────────────────
+def get_client_ip():
+    """
+    Default: use request.remote_addr because X-Forwarded-For can be spoofed.
+    For class simulation, set TRUST_X_FORWARDED_FOR=true if you want the
+    distributed scraper's fake IPs to behave like separate clients.
+    """
+    if TRUST_X_FORWARDED_FOR:
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def log_request(ip, path, status, flagged=False, reason=None):
     logging.info(json.dumps({
-        "ip": ip, "path": path, "status": status,
-        "flagged": flagged, "ts": time.time()
+        "ip": ip,
+        "path": path,
+        "method": request.method,
+        "status": status,
+        "flagged": flagged,
+        "reason": reason,
+        "user_agent": request.headers.get("User-Agent", ""),
+        "ts": time.time()
     }))
 
 
-def check_rate_limit(ip):
+def prune_timestamps(timestamps, window):
     now = time.time()
-    window_start = now - RATE_LIMIT_WINDOW
-    timestamps = [t for t in request_counts[ip] if t > window_start]
-    timestamps.append(now)
-    request_counts[ip] = timestamps
-    count = len(timestamps)
+    cutoff = now - window
+    return [t for t in timestamps if t > cutoff]
+
+
+def add_anomaly(ip, points, reason):
+    anomaly_scores[ip] += points
+    anomaly_reasons[ip].append({
+        "reason": reason,
+        "points": points,
+        "ts": time.time()
+    })
+
+
+def check_rate_limit(ip, is_api=False):
+    now = time.time()
+
+    request_counts[ip] = prune_timestamps(request_counts[ip], RATE_LIMIT_WINDOW)
+    request_counts[ip].append(now)
+
+    count = len(request_counts[ip])
 
     if ip in blocked_ips or count > BLOCK_THRESHOLD:
         blocked_ips.add(ip)
-        return "blocked", count
+        return "blocked", count, "hard block threshold exceeded"
+
     if count > RATE_LIMIT_MAX:
-        return "limited", count
-    return "ok", count
+        return "limited", count, "per-ip request rate exceeded"
+
+    if is_api:
+        api_request_counts[ip] = prune_timestamps(api_request_counts[ip], RATE_LIMIT_WINDOW)
+        api_request_counts[ip].append(now)
+
+        api_count = len(api_request_counts[ip])
+        if api_count > API_RATE_LIMIT_MAX:
+            add_anomaly(ip, 2, "high API request rate")
+            return "limited", api_count, "per-ip API rate exceeded"
+
+        global global_api_requests
+        global_api_requests = prune_timestamps(global_api_requests, RATE_LIMIT_WINDOW)
+        global_api_requests.append(now)
+
+        if len(global_api_requests) > GLOBAL_API_LIMIT_MAX:
+            add_anomaly(ip, 2, "global API traffic surge")
+            return "limited", len(global_api_requests), "global API surge detected"
+
+    return "ok", count, None
 
 
-def rate_limit(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        ip = request.remote_addr
-        status, count = check_rate_limit(ip)
+def check_anomaly(ip, path):
+    ua = request.headers.get("User-Agent", "").lower()
 
-        if status == "blocked":
-            log_request(ip, request.path, 403, flagged=True)
-            return jsonify({"error": "Forbidden — IP blocked due to excessive requests."}), 403
+    suspicious_agents = [
+        "python-requests",
+        "curl",
+        "wget",
+        "bot",
+        "scrapy",
+        "spider"
+    ]
 
-        if status == "limited":
-            log_request(ip, request.path, 429, flagged=True)
-            return jsonify({
-                "error": "Too Many Requests",
-                "retry_after": RATE_LIMIT_WINDOW,
-                "requests_in_window": count
-            }), 429
+    if any(agent in ua for agent in suspicious_agents):
+        add_anomaly(ip, 2, "suspicious user-agent")
 
-        log_request(ip, request.path, 200)
-        return f(*args, **kwargs)
-    return decorated
+    if path.startswith("/api/artwork/"):
+        try:
+            artwork_id = int(path.rstrip("/").split("/")[-1])
+            artwork_ids_seen[ip].add(artwork_id)
+
+            if len(artwork_ids_seen[ip]) >= 6:
+                add_anomaly(ip, 2, "many unique artwork detail pages scraped")
+        except ValueError:
+            pass
+
+    if path in ["/api/export-all", "/hidden/scraper-trap"]:
+        honeypot_hits[ip] += 1
+        add_anomaly(ip, 6, "honeypot endpoint accessed")
+
+    if anomaly_scores[ip] >= ANOMALY_BLOCK_SCORE:
+        blocked_ips.add(ip)
+        return "blocked", anomaly_scores[ip], "anomaly score threshold exceeded"
+
+    return "ok", anomaly_scores[ip], None
+
+
+def protect(is_api=False):
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            ip = get_client_ip()
+            path = request.path
+
+            rate_status, count, rate_reason = check_rate_limit(ip, is_api=is_api)
+            if rate_status == "blocked":
+                log_request(ip, path, 403, flagged=True, reason=rate_reason)
+                return jsonify({
+                    "error": "Forbidden — IP blocked.",
+                    "reason": rate_reason,
+                    "requests_in_window": count
+                }), 403
+
+            if rate_status == "limited":
+                log_request(ip, path, 429, flagged=True, reason=rate_reason)
+                return jsonify({
+                    "error": "Too Many Requests",
+                    "reason": rate_reason,
+                    "retry_after": RATE_LIMIT_WINDOW,
+                    "requests_in_window": count
+                }), 429
+
+            anomaly_status, score, anomaly_reason = check_anomaly(ip, path)
+            if anomaly_status == "blocked":
+                log_request(ip, path, 403, flagged=True, reason=anomaly_reason)
+                return jsonify({
+                    "error": "Forbidden — automated scraping behavior detected.",
+                    "reason": anomaly_reason,
+                    "anomaly_score": score
+                }), 403
+
+            response = f(*args, **kwargs)
+            log_request(ip, path, 200)
+            return response
+
+        return decorated
+    return decorator
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.route("/")
-@rate_limit
+@protect()
 def index():
     return render_template("index.html", artworks=ARTWORKS)
 
 
 @app.route("/artwork/<int:artwork_id>")
-@rate_limit
+@protect()
 def artwork_detail(artwork_id):
     artwork = ARTWORK_INDEX.get(artwork_id)
     if not artwork:
@@ -106,13 +229,13 @@ def artwork_detail(artwork_id):
 
 # ── API endpoints (primary scraping targets) ──────────────────────────────────
 @app.route("/api/artworks")
-@rate_limit
+@protect(is_api=True)
 def api_artworks():
     return jsonify(ARTWORKS)
 
 
 @app.route("/api/artwork/<int:artwork_id>")
-@rate_limit
+@protect(is_api=True)
 def api_artwork(artwork_id):
     artwork = ARTWORK_INDEX.get(artwork_id)
     if not artwork:
@@ -125,18 +248,31 @@ def api_artwork(artwork_id):
 def admin_stats():
     now = time.time()
     window_start = now - RATE_LIMIT_WINDOW
+
     stats = {}
     for ip, timestamps in request_counts.items():
         recent = [t for t in timestamps if t > window_start]
+        recent_api = [t for t in api_request_counts[ip] if t > window_start]
+
         stats[ip] = {
             "requests_in_window": len(recent),
+            "api_requests_in_window": len(recent_api),
             "total_requests": len(timestamps),
             "blocked": ip in blocked_ips,
+            "anomaly_score": anomaly_scores[ip],
+            "honeypot_hits": honeypot_hits[ip],
+            "unique_artworks_scraped": len(artwork_ids_seen[ip]),
+            "recent_reasons": anomaly_reasons[ip][-5:]
         }
+
     return jsonify({
         "window_seconds": RATE_LIMIT_WINDOW,
         "rate_limit_max": RATE_LIMIT_MAX,
+        "api_rate_limit_max": API_RATE_LIMIT_MAX,
+        "global_api_limit_max": GLOBAL_API_LIMIT_MAX,
         "block_threshold": BLOCK_THRESHOLD,
+        "anomaly_block_score": ANOMALY_BLOCK_SCORE,
+        "global_api_requests_in_window": len([t for t in global_api_requests if t > window_start]),
         "blocked_ips": list(blocked_ips),
         "ip_stats": stats,
     })
@@ -145,9 +281,51 @@ def admin_stats():
 @app.route("/admin/reset", methods=["POST"])
 def admin_reset():
     request_counts.clear()
+    api_request_counts.clear()
+    global_api_requests.clear()
     blocked_ips.clear()
+    anomaly_scores.clear()
+    anomaly_reasons.clear()
+    artwork_ids_seen.clear()
+    honeypot_hits.clear()
     return jsonify({"status": "reset"})
 
+# ── Honeypot endpoints ────────────────────────────────────────────────────────
+@app.route("/api/export-all")
+@protect(is_api=True)
+def api_export_all_honeypot():
+    """
+    Fake bulk-export endpoint.
+    Normal users should never visit this. Bots looking for easy scrape targets may.
+    """
+    ip = get_client_ip()
+    blocked_ips.add(ip)
+    log_request(ip, request.path, 403, flagged=True, reason="honeypot bulk export endpoint")
+    return jsonify({
+        "error": "Forbidden — honeypot endpoint accessed."
+    }), 403
 
+
+@app.route("/hidden/scraper-trap")
+@protect()
+def hidden_scraper_trap():
+    ip = get_client_ip()
+    blocked_ips.add(ip)
+    log_request(ip, request.path, 403, flagged=True, reason="hidden honeypot endpoint")
+    return jsonify({
+        "error": "Forbidden — honeypot endpoint accessed."
+    }), 403
+
+
+@app.route("/robots.txt")
+def robots_txt():
+    return (
+        "User-agent: *\n"
+        "Disallow: /api/\n"
+        "Disallow: /api/export-all\n"
+        "Disallow: /hidden/scraper-trap\n",
+        200,
+        {"Content-Type": "text/plain"}
+    )
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True, use_reloader=False)
