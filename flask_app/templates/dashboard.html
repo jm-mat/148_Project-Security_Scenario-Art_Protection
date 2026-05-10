@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Scraper Dashboard</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        h2 {
+            margin-bottom: 15px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            margin-bottom: 30px;
+        }
+
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background: #eee;
+        }
+
+        tr:hover {
+            background: #f0f0f0;
+        }
+
+        .blocked {
+            background: #ffdddd;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>Cluster Overview</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Cluster</th>
+                <th>Members</th>
+                <th>Requests (Window)</th>
+                <th>API Requests (Window)</th>
+                <th>Total Requests</th>
+                <th>Anomaly Score</th>
+                <th>Honeypot Hits</th>
+                <th>Unique Artworks</th>
+                <th>Recent Reasons</th>
+                <th>Blocked</th>
+            </tr>
+        </thead>
+        <tbody id="cluster-body">
+            <!-- Filled dynamically -->
+        </tbody>
+    </table>
+
+
+    <h2>Scraper Dashboard</h2>
+
+    <table>
+        <thead>
+            <tr>
+                <th>IP</th>
+                <th>Scraper Name</th>
+                <th>Requests (Window)</th>
+                <th>API Requests (Window)</th>
+                <th>Total Requests</th>
+                <th>Anomaly Score</th>
+                <th>Honeypot Hits</th>
+                <th>Unique Artworks</th>
+                <th>Recent Reasons</th>
+                <th>Blocked</th>
+            </tr>
+        </thead>
+        <tbody id="scraper-body">
+            <!-- Filled dynamically -->
+        </tbody>
+    </table>
+
+    <script>
+        async function loadStats() {
+            const res = await fetch("/admin/stats");
+            const data = await res.json();
+
+            /* Populate CLUSTER table */
+            const clusterBody = document.getElementById("cluster-body");
+            clusterBody.innerHTML = "";
+
+            Object.entries(data.cluster_stats).forEach(([cluster, s]) => {
+                const row = document.createElement("tr");
+
+                if (s.blocked) {
+                    row.classList.add("blocked");
+                }
+
+                row.innerHTML = `
+                    <td>${cluster}</td>
+                    <td>${s.members.join("<br>")}</td>
+                    <td>${s.requests_in_window}</td>
+                    <td>${s.api_requests_in_window}</td>
+                    <td>${s.total_requests}</td>
+                    <td>${s.anomaly_score}</td>
+                    <td>${s.honeypot_hits}</td>
+                    <td>${s.unique_artworks_scraped}</td>
+                    <td>${s.recent_reasons.map(r => r.reason).join("<br>")}</td>
+                    <td>${s.blocked ? "Yes" : "No"}</td>
+                `;
+
+                clusterBody.appendChild(row);
+            });
+
+
+            /* Populate IP table */
+            const body = document.getElementById("scraper-body");
+            body.innerHTML = "";
+
+            const stats = data.ip_stats;
+
+            Object.entries(stats).forEach(([ip, s]) => {
+                const row = document.createElement("tr");
+
+                if (s.blocked) {
+                    row.classList.add("blocked");
+                }
+
+                row.innerHTML = `
+                    <td>${s.ip}</td>
+                    <td>${s.scraper_name}</td>
+                    <td>${s.requests_in_window}</td>
+                    <td>${s.api_requests_in_window}</td>
+                    <td>${s.total_requests}</td>
+                    <td>${s.anomaly_score}</td>
+                    <td>${s.honeypot_hits}</td>
+                    <td>${s.unique_artworks_scraped}</td>
+                    <td>${s.recent_reasons.map(r => r.reason).join("<br>")}</td>
+                    <td>${s.blocked ? "Yes" : "No"}</td>
+                `;
+
+                body.appendChild(row);
+            });
+        }
+
+        loadStats();
+        setInterval(loadStats, 2000);
+    </script>
+
+</body>
+</html>
+
