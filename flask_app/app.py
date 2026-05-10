@@ -8,6 +8,45 @@ from collections import defaultdict, deque
 
 app = Flask(__name__)
 
+# Scraper name mapping 
+SCRAPER_NAMES = {
+    "10.0.0.2": "CasualHuman",
+    "10.0.0.3": "MultiHuman",
+    "10.0.0.4": "ExpertHuman",
+
+    "10.0.0.5": "FastRepeaterBot",
+    "10.0.0.6": "EnumeratorBot",
+    "10.0.0.7": "RandomWalkerBot",
+    "10.0.0.8": "AdaptiveBot",
+    "10.0.0.9": "StrategicBot",
+
+    "10.0.0.10": "LoadBot-1",
+    "10.0.0.11": "LoadBot-2",
+    "10.0.0.12": "LoadBot-3",
+    "10.0.0.13": "LoadBot-4",
+}
+
+# Cluster to simulate distributed scraping
+BOT_CLUSTERS = {
+    "load_cluster": [
+        "10.0.0.10",
+        "10.0.0.11",
+        "10.0.0.12",
+        "10.0.0.13"
+    ]
+}
+
+# Dashboard visualization
+@app.route("/admin/dashboard")
+def admin_dashboard():
+    return render_template("dashboard.html")
+# cluster helper
+def get_cluster(ip):
+    for cluster, members in BOT_CLUSTERS.items():
+        if ip in members:
+            return cluster
+    return ip
+
 # ── Logging ──────────────────────────────────────────────────────────────────
 os.makedirs("logs", exist_ok=True)
 logging.basicConfig(
@@ -15,6 +54,15 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(message)s",
 )
+
+# debug route
+@app.route("/debug/ip")
+def debug_ip():
+    return {
+        "remote_addr": request.remote_addr,
+        "x_forwarded_for": request.headers.get("X-Forwarded-For"),
+        "detected_ip": get_client_ip()
+    }
 
 # ── In-memory stores ──────────────────────────────────────────────────────────
 request_counts = defaultdict(list)       # ip -> [timestamps]
@@ -37,7 +85,6 @@ GLOBAL_API_LIMIT_MAX = 80        # catches distributed scraping burst
 ANOMALY_BLOCK_SCORE = 6
 
 # Only enable this for your simulation if you want X-Forwarded-For spoofing
-# in distributed_scraper.py to count as different IPs.
 TRUST_X_FORWARDED_FOR = os.getenv("TRUST_X_FORWARDED_FOR", "false").lower() == "true"
 
 # ── Mock artwork data ─────────────────────────────────────────────────────────
@@ -59,15 +106,17 @@ ARTWORK_INDEX = {a["id"]: a for a in ARTWORKS}
 # ── Defense helpers ───────────────────────────────────────────────────────────
 def get_client_ip():
     """
-    Default: use request.remote_addr because X-Forwarded-For can be spoofed.
-    For class simulation, set TRUST_X_FORWARDED_FOR=true if you want the
-    distributed scraper's fake IPs to behave like separate clients.
+    Returns the client IP.
+    If TRUST_X_FORWARDED_FOR=true, use the header sent by bots.
     """
     if TRUST_X_FORWARDED_FOR:
-        forwarded = request.headers.get("X-Forwarded-For", "")
+        forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
             return forwarded.split(",")[0].strip()
+
+    # fallback: real remote address
     return request.remote_addr or "unknown"
+
 
 
 def log_request(ip, path, status, flagged=False, reason=None):
@@ -249,12 +298,15 @@ def admin_stats():
     now = time.time()
     window_start = now - RATE_LIMIT_WINDOW
 
+    # --- Per-IP stats ---
     stats = {}
     for ip, timestamps in request_counts.items():
         recent = [t for t in timestamps if t > window_start]
         recent_api = [t for t in api_request_counts[ip] if t > window_start]
 
         stats[ip] = {
+            "ip": ip,
+            "scraper_name": SCRAPER_NAMES.get(ip, "Unknown"),
             "requests_in_window": len(recent),
             "api_requests_in_window": len(recent_api),
             "total_requests": len(timestamps),
@@ -264,6 +316,45 @@ def admin_stats():
             "unique_artworks_scraped": len(artwork_ids_seen[ip]),
             "recent_reasons": anomaly_reasons[ip][-5:]
         }
+
+    # --- Cluster-level stats ---
+    cluster_stats = {}
+
+    #Initialize cluster entries
+    for cluster, members in BOT_CLUSTERS.items():
+        cluster_stats[cluster] = {
+            "members": members,
+            "requests_in_window": 0,
+            "api_requests_in_window": 0,
+            "total_requests": 0,
+            "blocked": False,
+            "anomaly_score": 0,
+            "honeypot_hits": 0,
+            "unique_artworks_scraped": 0,
+            "recent_reasons": []
+        }
+
+    # Populate cluster stats from IP stats
+    for cluster, members in BOT_CLUSTERS.items():
+        for ip in members:
+            if ip in stats:
+                s = stats[ip]
+                cluster_stats[cluster]["requests_in_window"] += s["requests_in_window"]
+                cluster_stats[cluster]["api_requests_in_window"] += s["api_requests_in_window"]
+                cluster_stats[cluster]["total_requests"] += s["total_requests"]
+                cluster_stats[cluster]["anomaly_score"] += s["anomaly_score"]
+                cluster_stats[cluster]["honeypot_hits"] += s["honeypot_hits"]
+                cluster_stats[cluster]["unique_artworks_scraped"] += s["unique_artworks_scraped"]
+                cluster_stats[cluster]["recent_reasons"] += s["recent_reasons"]
+
+                if s["blocked"]:
+                    cluster_stats[cluster]["blocked"] = True
+
+    # If a cluster is blocked, block all its members
+    for cluster, cstats in cluster_stats.items():
+        if cstats["blocked"]:
+            for ip in cstats["members"]:
+                blocked_ips.add(ip)
 
     return jsonify({
         "window_seconds": RATE_LIMIT_WINDOW,
@@ -275,6 +366,7 @@ def admin_stats():
         "global_api_requests_in_window": len([t for t in global_api_requests if t > window_start]),
         "blocked_ips": list(blocked_ips),
         "ip_stats": stats,
+        "cluster_stats": cluster_stats
     })
 
 
