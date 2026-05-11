@@ -4,7 +4,7 @@ import random
 import time
 import os
 
-BASE = "http://10.0.0.1:5001"   # Flask server running on host 'srv' in Mininet
+BASE = "http://10.0.0.1:5001" #server running locally
 FAKE_IP = os.getenv("FAKE_IP", "127.0.0.1")
 
 # per-instance randomness
@@ -14,7 +14,7 @@ SPEED = random.uniform(0.2, 0.6)      # faster than humans
 start = random.randint(1, 5)
 end = start + random.randint(10, 40)
 
-# loop through the range repeatedly to accumulate anomaly score
+# loop through the range repeatedly
 while True:
     for art_id in range(start, end):
         page = f"/api/artwork/{art_id}"
