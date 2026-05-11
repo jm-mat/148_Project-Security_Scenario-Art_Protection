@@ -2,39 +2,26 @@ import os
 import time
 import json
 import logging
+import importlib
 from functools import wraps
 from flask import Flask, request, jsonify, render_template, abort
 from collections import defaultdict, deque
 
 app = Flask(__name__)
 
-# Scraper name mapping 
-SCRAPER_NAMES = {
-    "10.0.0.2": "CasualHuman",
-    "10.0.0.3": "MultiHuman",
-    "10.0.0.4": "ExpertHuman",
+TOPOLOGY = os.getenv("TOPOLOGY", "topology1_mappings")  # change topology_mapping based on the topology being ran
+topo = importlib.import_module(f"flask_app.topologies.{TOPOLOGY}")
 
-    "10.0.0.5": "FastRepeaterBot",
-    "10.0.0.6": "EnumeratorBot",
-    "10.0.0.7": "RandomWalkerBot",
-    "10.0.0.8": "AdaptiveBot",
-    "10.0.0.9": "StrategicBot",
+try:
+    topo = importlib.import_module(f"flask_app.topologies.{TOPOLOGY}")
+    print(f"[TOPOLOGY] Loaded mapping module: {TOPOLOGY}")
+except Exception as e:
+    print(f"[TOPOLOGY IMPORT ERROR] Could not load {TOPOLOGY}: {e}")
+    raise
 
-    "10.0.0.10": "LoadBot-1",
-    "10.0.0.11": "LoadBot-2",
-    "10.0.0.12": "LoadBot-3",
-    "10.0.0.13": "LoadBot-4",
-}
 
-# Cluster to simulate distributed scraping
-BOT_CLUSTERS = {
-    "load_cluster": [
-        "10.0.0.10",
-        "10.0.0.11",
-        "10.0.0.12",
-        "10.0.0.13"
-    ]
-}
+SCRAPER_NAMES = topo.SCRAPER_NAMES
+BOT_CLUSTERS = topo.BOT_CLUSTERS
 
 # Dashboard visualization
 @app.route("/admin/dashboard")
@@ -48,9 +35,26 @@ def get_cluster(ip):
     return ip
 
 # ── Logging ──────────────────────────────────────────────────────────────────
-os.makedirs("logs", exist_ok=True)
+# Absolute path to the folder containing app.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Absolute path to logs directory
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# Timestamped log file
+timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+# Clean topology name
+topology_name = TOPOLOGY.replace("_mappings", "")
+
+log_filename = os.path.join(
+    LOG_DIR,
+    f"{topology_name}_requests_{timestamp}.log"
+)
+
 logging.basicConfig(
-    filename="logs/requests.log",
+    filename=log_filename,
     level=logging.INFO,
     format="%(asctime)s %(message)s",
 )
@@ -300,7 +304,21 @@ def admin_stats():
 
     # --- Per-IP stats ---
     stats = {}
-    for ip, timestamps in request_counts.items():
+    for ip, timestamps in request_counts.items():The defense module is organized into several coordinated layers that work together to identify and mitigate scraper activity:
+
+The Per‑IP Rate Limiting layer tracks requests per IP over a 10‑second window, applying soft limits above 20 requests and hard blocks above 50 to stop high‑frequency scraping from a single source.
+
+The API‑Specific Rate Limiting layer enforces stricter thresholds for /api/* endpoints, allowing a maximum of 15 API requests per window to protect structured data commonly targeted by scrapers.
+
+The Global API Rate Monitoring layer tracks total API traffic across all clients, triggering alerts when combined activity exceeds 80 requests per 10 seconds, enabling detection of distributed scraping attacks that stay below per‑IP limits.
+
+The Anomaly‑Based Detection layer assigns each IP an anomaly score based on suspicious behaviors such as bot‑like User‑Agents, high API usage, or scraping many unique artwork IDs; reaching a score of 6 results in an automatic block.
+
+The Honeypot Endpoint layer introduces fake URLs (e.g., /api/export-all, /hidden/scraper-trap) that legitimate users never access; any request to these endpoints immediately flags the client and adds a high anomaly score.
+
+The Header & Behavior Analysis layer inspects User‑Agent strings and navigation patterns to distinguish normal users from bots, detecting missing headers, sequential scraping, and other non‑human behaviors.
+
+Together, these layered defenses provide a robust, multi‑angle protection system capable of identifying predictable, randomized, and evasive scraper strategies.
         recent = [t for t in timestamps if t > window_start]
         recent_api = [t for t in api_request_counts[ip] if t > window_start]
 
