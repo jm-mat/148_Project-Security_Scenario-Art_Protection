@@ -1,10 +1,10 @@
-# adaptive bot
+# adaptive bot (human-like behavior tester)
 import requests
 import time
 import random
 import os
 
-BASE = "http://10.0.0.1:5001"   # Flask server running on host 'srv' in Mininet
+BASE = "http://10.0.0.1:5001" #server running locally
 
 FAKE_IP = os.getenv("FAKE_IP", "127.0.0.1")
 
@@ -42,7 +42,7 @@ session_counter = 0
 while True:
     session_counter += 1
 
-    # after some time, UA becomes slightly more suspicious (helps Layer 6)
+    # after some time, User Agent becomes slightly more suspicious
     if session_counter == 90:
         HEADERS["User-Agent"] = "python-requests/2.31"
         print(f"[ADAPT] UA shifted to more suspicious: {HEADERS['User-Agent']}")
