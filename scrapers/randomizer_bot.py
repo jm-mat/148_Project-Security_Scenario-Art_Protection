@@ -4,7 +4,7 @@ import random
 import time
 import os
 
-BASE = "http://10.0.0.1:5001"   # Flask server running on host 'srv' in Mininet
+BASE = "http://10.0.0.1:5001" #server running locally
 FAKE_IP = os.getenv("FAKE_IP", "127.0.0.1")
 
 PAGES = [
@@ -22,7 +22,7 @@ MY_PAGES = random.sample(PAGES, random.randint(3, len(PAGES)))
 HEADERS = {"X-Forwarded-For": FAKE_IP}
 
 for i in range(120):
-    # NEW: weighted randomness (bots often favor API endpoints)
+    # weighted randomness (bots often favor API endpoints)
     page = random.choices(
         MY_PAGES,
         weights=[1 if "api" not in p else 3 for p in MY_PAGES]
