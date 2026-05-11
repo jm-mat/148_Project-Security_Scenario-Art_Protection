@@ -304,21 +304,7 @@ def admin_stats():
 
     # --- Per-IP stats ---
     stats = {}
-    for ip, timestamps in request_counts.items():The defense module is organized into several coordinated layers that work together to identify and mitigate scraper activity:
-
-The Per‑IP Rate Limiting layer tracks requests per IP over a 10‑second window, applying soft limits above 20 requests and hard blocks above 50 to stop high‑frequency scraping from a single source.
-
-The API‑Specific Rate Limiting layer enforces stricter thresholds for /api/* endpoints, allowing a maximum of 15 API requests per window to protect structured data commonly targeted by scrapers.
-
-The Global API Rate Monitoring layer tracks total API traffic across all clients, triggering alerts when combined activity exceeds 80 requests per 10 seconds, enabling detection of distributed scraping attacks that stay below per‑IP limits.
-
-The Anomaly‑Based Detection layer assigns each IP an anomaly score based on suspicious behaviors such as bot‑like User‑Agents, high API usage, or scraping many unique artwork IDs; reaching a score of 6 results in an automatic block.
-
-The Honeypot Endpoint layer introduces fake URLs (e.g., /api/export-all, /hidden/scraper-trap) that legitimate users never access; any request to these endpoints immediately flags the client and adds a high anomaly score.
-
-The Header & Behavior Analysis layer inspects User‑Agent strings and navigation patterns to distinguish normal users from bots, detecting missing headers, sequential scraping, and other non‑human behaviors.
-
-Together, these layered defenses provide a robust, multi‑angle protection system capable of identifying predictable, randomized, and evasive scraper strategies.
+    for ip, timestamps in request_counts.items():
         recent = [t for t in timestamps if t > window_start]
         recent_api = [t for t in api_request_counts[ip] if t > window_start]
 
