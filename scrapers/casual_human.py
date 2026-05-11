@@ -4,7 +4,7 @@ import random
 import time
 import os
 
-BASE = "http://10.0.0.1:5001"   # Flask server running on host 'srv' in Mininet
+BASE = "http://10.0.0.1:5001" #server running locally
 
 FAKE_IP = os.getenv("FAKE_IP", "127.0.0.1")
 
